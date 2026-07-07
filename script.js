@@ -9,6 +9,7 @@ let currentColorIndex = 0;
 let handPosition = null;
 let hoveredCircleId = null;
 let holdStartTime = null;
+let cameraInitialized = false;
 const HOLD_DURATION = 500; // milliseconds
 const COLORS = [
     { name: 'แดง', thai: 'แตะสีแดง', hex: '#FF6B6B', rgb: 'rgb(255, 107, 107)' },
@@ -36,37 +37,97 @@ const canvasElement = document.getElementById('canvas');
 const canvasCtx = canvasElement.getContext('2d');
 
 async function initializeHandDetection() {
-    const hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
+    try {
+        console.log('Starting hand detection initialization...');
+        
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
 
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7
-    });
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
 
-    hands.onResults(onHandsResults);
+        hands.onResults(onHandsResults);
 
-    const camera = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({ image: videoElement });
-        },
-        width: 1280,
-        height: 720
-    });
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
 
-    camera.start();
+        camera.start();
+        cameraInitialized = true;
+        console.log('Camera started successfully');
 
-    // Resize canvas
-    function resizeCanvases() {
-        canvasElement.width = videoElement.offsetWidth;
-        canvasElement.height = videoElement.offsetHeight;
+        // Resize canvas
+        function resizeCanvases() {
+            canvasElement.width = videoElement.offsetWidth;
+            canvasElement.height = videoElement.offsetHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvases);
+        resizeCanvases();
+    } catch (error) {
+        console.error('Error initializing hand detection:', error);
+        showCameraError(error.message);
     }
+}
 
-    window.addEventListener('resize', resizeCanvases);
-    resizeCanvases();
+function showCameraError(message) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    `;
+    
+    const content = document.createElement('div');
+    content.style.cssText = `
+        background: white;
+        border-radius: 20px;
+        padding: 40px;
+        text-align: center;
+        max-width: 500px;
+    `;
+    
+    content.innerHTML = `
+        <h2 style="color: #e74c3c; margin-bottom: 20px;">⚠️ ปัญหากล้อง</h2>
+        <p style="color: #333; margin-bottom: 15px; line-height: 1.6;">
+            <strong>${message || 'ไม่สามารถเข้าถึงกล้องได้'}</strong>
+        </p>
+        <ol style="text-align: left; color: #666; margin-bottom: 20px;">
+            <li>✅ ตรวจสอบว่าอนุญาตให้ใช้กล้องแล้ว</li>
+            <li>✅ ลองโหลดหน้านี้ใหม่</li>
+            <li>✅ ปิดแอปพลิเคชันอื่นที่ใช้กล้อง</li>
+            <li>✅ ใช้ HTTPS (ไม่ใช่ HTTP)</li>
+        </ol>
+        <button onclick="location.reload()" style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 10px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: bold;
+        ">🔄 โหลดใหม่</button>
+    `;
+    
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
 }
 
 function onHandsResults(results) {
@@ -253,6 +314,11 @@ function updateInstruction() {
 
 function startGame() {
     if (gameActive) return;
+    
+    if (!cameraInitialized) {
+        alert('⚠️ กล้องยังไม่พร้อม กรุณารอสักครู่');
+        return;
+    }
 
     gameActive = true;
     score = 0;
@@ -326,54 +392,76 @@ function createConfetti() {
 }
 
 function playSuccessSound() {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
 
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
 
-    oscillator.frequency.value = 800;
-    gain.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+        oscillator.frequency.value = 800;
+        gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
 
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.3);
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (e) {
+        console.log('Sound not available');
+    }
 }
 
 function playWrongSound() {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
 
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
 
-    oscillator.frequency.value = 300;
-    gain.gain.setValueAtTime(0.2, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+        oscillator.frequency.value = 300;
+        gain.gain.setValueAtTime(0.2, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
 
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.2);
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.2);
+    } catch (e) {
+        console.log('Sound not available');
+    }
 }
 
 function speakColor(colorName) {
     if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance('สี' + colorName);
-        utterance.lang = 'th-TH';
-        utterance.rate = 0.8;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        try {
+            const utterance = new SpeechSynthesisUtterance('สี' + colorName);
+            utterance.lang = 'th-TH';
+            utterance.rate = 0.8;
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utterance);
+        } catch (e) {
+            console.log('Speech synthesis not available');
+        }
     }
 }
 
 function toggleFullscreen() {
     if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen();
+        document.documentElement.requestFullscreen().catch(err => {
+            console.log('Fullscreen error:', err);
+        });
     } else {
         document.exitFullscreen();
     }
 }
 
 // Initialize on load
-window.addEventListener('load', initializeHandDetection);
+window.addEventListener('load', () => {
+    console.log('Page loaded, initializing hand detection...');
+    initializeHandDetection();
+});
+
+// Also try to initialize immediately in case load event already fired
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    initializeHandDetection();
+}
