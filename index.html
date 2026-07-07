@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎨 Color Hunter - Thai Color Learning Game</title>
-    <script async src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
-    <script async src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2"></script>
-    <script async src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2"></script>
     <style>
         * {
             margin: 0;
@@ -100,12 +97,10 @@
             height: 100%;
             object-fit: cover;
             transform: scaleX(-1);
+            display: none;
         }
 
         #canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
             width: 100%;
             height: 100%;
             transform: scaleX(-1);
@@ -117,7 +112,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -144,6 +139,7 @@
             color: #667eea;
             font-weight: bold;
             font-size: 1.1rem;
+            text-align: center;
         }
 
         .cursor-indicator {
@@ -281,11 +277,13 @@
         }
 
         .hold-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
             width: 0%;
             height: 4px;
             background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
             border-radius: 2px;
-            margin-top: 5px;
             transition: width 0.05s linear;
         }
 
@@ -314,13 +312,14 @@
             flex: 1;
         }
 
-        .play-btn:hover {
+        .play-btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
 
-        .play-btn:active {
-            transform: translateY(0);
+        .play-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .fullscreen-btn {
@@ -490,12 +489,12 @@
 
         <div class="game-container">
             <div class="video-section">
-                <video id="video" autoplay playsinline muted></video>
                 <canvas id="canvas"></canvas>
+                <video id="video" autoplay playsinline muted></video>
                 <div class="cursor-indicator" id="cursorIndicator"></div>
                 <div class="loading-overlay" id="loadingOverlay">
                     <div class="spinner"></div>
-                    <div class="loading-text">กำลังเปิดกล้อง...</div>
+                    <div class="loading-text">กำลังเปิดกล้อง...<br><small>โปรดอนุญาตใช้กล้อง</small></div>
                 </div>
             </div>
 
@@ -550,6 +549,11 @@
         </div>
     </div>
 
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
     <script>
         // Game variables
         let gameActive = false;
@@ -562,7 +566,8 @@
         let handPosition = null;
         let hoveredCircleId = null;
         let holdStartTime = null;
-        let detector = null;
+        let hands = null;
+        let camera = null;
         const HOLD_DURATION = 500;
         
         const COLORS = [
@@ -579,46 +584,50 @@
         const canvasElement = document.getElementById('canvas');
         const canvasCtx = canvasElement.getContext('2d');
 
-        async function initializeHandDetection() {
+        async function initializeMediaPipe() {
             try {
-                console.log('กำลังเตรียม Hand Detection...');
+                console.log('Initializing MediaPipe Hands...');
                 
-                // Check if tf and hand-pose-detection are loaded
+                // Wait for MediaPipe to load
                 let attempts = 0;
-                while ((typeof tf === 'undefined' || typeof handPoseDetection === 'undefined') && attempts < 20) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                while (typeof window.Hands === 'undefined' && attempts < 30) {
+                    await new Promise(resolve => setTimeout(resolve, 300));
                     attempts++;
                 }
 
-                if (typeof tf === 'undefined' || typeof handPoseDetection === 'undefined') {
-                    throw new Error('ไลบรารี่ยังไม่พร้อม โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+                if (typeof window.Hands === 'undefined') {
+                    throw new Error('ไลบรารี่ MediaPipe ไม่สามารถโหลดได้ โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
                 }
 
-                // Initialize hand pose detection
-                const model = await handPoseDetection.createDetector(
-                    handPoseDetection.SupportedModels.MediaPipeHands,
-                    {
-                        runtime: 'mediapipe',
-                        solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/hands'
-                    }
-                );
-                detector = model;
-                console.log('Hand Detection พร้อมแล้ว');
-
-                // Start video stream
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-                    audio: false
+                // Create Hands instance
+                hands = new window.Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
                 });
-                
+
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults(onResults);
+
+                console.log('MediaPipe Hands initialized');
+
+                // Get camera stream
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user' }
+                });
+
                 videoElement.srcObject = stream;
                 
                 videoElement.onloadedmetadata = () => {
                     videoElement.play();
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                    console.log('กล้องพร้อมแล้ว');
+                    console.log('Camera ready');
                     resizeCanvas();
-                    startDetection();
+                    document.getElementById('loadingOverlay').style.display = 'none';
+                    startCamera();
                 };
 
             } catch (error) {
@@ -647,41 +656,15 @@
             `;
         }
 
-        async function startDetection() {
+        async function startCamera() {
             async function detectFrame() {
-                if (!detector) {
+                if (!hands) {
                     requestAnimationFrame(detectFrame);
                     return;
                 }
 
                 try {
-                    const predictions = await detector.estimateHands(videoElement);
-                    
-                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-                    if (predictions && predictions.length > 0) {
-                        const hand = predictions[0];
-                        drawHandSkeleton(hand.keypoints);
-                        
-                        // Get index fingertip (keypoint 8)
-                        const indexTip = hand.keypoints[8];
-                        const x = (1 - indexTip.x / videoElement.videoWidth) * canvasElement.width;
-                        const y = (indexTip.y / videoElement.videoHeight) * canvasElement.height;
-
-                        handPosition = { x, y };
-
-                        const cursor = document.getElementById('cursorIndicator');
-                        cursor.style.display = 'block';
-                        cursor.style.left = x + 'px';
-                        cursor.style.top = y + 'px';
-
-                        if (gameActive) {
-                            checkCircleHover(x, y);
-                        }
-                    } else {
-                        handPosition = null;
-                        document.getElementById('cursorIndicator').style.display = 'none';
-                    }
+                    await hands.send({ image: videoElement });
                 } catch (e) {
                     console.error('Detection error:', e);
                 }
@@ -692,39 +675,72 @@
             detectFrame();
         }
 
-        function drawHandSkeleton(keypoints) {
-            const connections = [
-                [0, 1], [1, 2], [2, 3], [3, 4],
-                [0, 5], [5, 6], [6, 7], [7, 8],
-                [0, 9], [9, 10], [10, 11], [11, 12],
-                [0, 13], [13, 14], [14, 15], [15, 16],
-                [0, 17], [17, 18], [18, 19], [19, 20]
-            ];
+        function onResults(results) {
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
 
-            canvasCtx.strokeStyle = 'rgba(102, 126, 234, 0.5)';
-            canvasCtx.lineWidth = 2;
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Draw hand skeleton
+                drawConnectors(canvasCtx, landmarks, window.Hands.HAND_CONNECTIONS, {
+                    color: 'rgba(102, 126, 234, 0.5)',
+                    lineWidth: 2
+                });
+
+                drawLandmarks(canvasCtx, landmarks, {
+                    color: 'rgba(102, 126, 234, 0.8)',
+                    fillColor: 'rgba(102, 126, 234, 0.8)',
+                    radius: 4
+                });
+
+                // Index fingertip is landmark 8
+                const indexTip = landmarks[8];
+                const x = (1 - indexTip.x) * canvasElement.width;
+                const y = indexTip.y * canvasElement.height;
+
+                // Draw red dot for index tip
+                canvasCtx.fillStyle = '#FF6B6B';
+                canvasCtx.beginPath();
+                canvasCtx.arc((1 - indexTip.x) * canvasElement.width, indexTip.y * canvasElement.height, 6, 0, 2 * Math.PI);
+                canvasCtx.fill();
+
+                handPosition = { x, y };
+
+                const cursor = document.getElementById('cursorIndicator');
+                cursor.style.display = 'block';
+                cursor.style.left = x + 'px';
+                cursor.style.top = y + 'px';
+
+                if (gameActive) {
+                    checkCircleHover(x, y);
+                }
+            } else {
+                handPosition = null;
+                document.getElementById('cursorIndicator').style.display = 'none';
+            }
+        }
+
+        function drawConnectors(ctx, landmarks, connections, { color = 'white', lineWidth = 2 } = {}) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
 
             connections.forEach(connection => {
-                const start = keypoints[connection[0]];
-                const end = keypoints[connection[1]];
-                const startX = (1 - start.x / videoElement.videoWidth) * canvasElement.width;
-                const startY = (start.y / videoElement.videoHeight) * canvasElement.height;
-                const endX = (1 - end.x / videoElement.videoWidth) * canvasElement.width;
-                const endY = (end.y / videoElement.videoHeight) * canvasElement.height;
-
-                canvasCtx.beginPath();
-                canvasCtx.moveTo(startX, startY);
-                canvasCtx.lineTo(endX, endY);
-                canvasCtx.stroke();
+                const start = landmarks[connection[0]];
+                const end = landmarks[connection[1]];
+                ctx.beginPath();
+                ctx.moveTo((1 - start.x) * canvasElement.width, start.y * canvasElement.height);
+                ctx.lineTo((1 - end.x) * canvasElement.width, end.y * canvasElement.height);
+                ctx.stroke();
             });
+        }
 
-            keypoints.forEach((keypoint, idx) => {
-                const x = (1 - keypoint.x / videoElement.videoWidth) * canvasElement.width;
-                const y = (keypoint.y / videoElement.videoHeight) * canvasElement.height;
-                canvasCtx.fillStyle = idx === 8 ? '#FF6B6B' : 'rgba(102, 126, 234, 0.8)';
-                canvasCtx.beginPath();
-                canvasCtx.arc(x, y, idx === 8 ? 6 : 4, 0, 2 * Math.PI);
-                canvasCtx.fill();
+        function drawLandmarks(ctx, landmarks, { color = 'white', fillColor = 'white', radius = 3 } = {}) {
+            ctx.fillStyle = fillColor;
+            landmarks.forEach(landmark => {
+                ctx.beginPath();
+                ctx.arc((1 - landmark.x) * canvasElement.width, landmark.y * canvasElement.height, radius, 0, 2 * Math.PI);
+                ctx.fill();
             });
         }
 
@@ -751,7 +767,10 @@
                     if (holdStartTime) {
                         const elapsed = Date.now() - holdStartTime;
                         const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
-                        circle.style.setProperty('--hold-progress', progress + '%');
+                        const progressBar = circle.querySelector('.hold-progress');
+                        if (progressBar) {
+                            progressBar.style.width = progress + '%';
+                        }
 
                         if (elapsed >= HOLD_DURATION) {
                             selectCircle(circleId);
@@ -760,7 +779,10 @@
                         }
                     }
                 } else {
-                    circle.style.setProperty('--hold-progress', '0%');
+                    const progressBar = circle.querySelector('.hold-progress');
+                    if (progressBar) {
+                        progressBar.style.width = '0%';
+                    }
                 }
             });
 
@@ -975,7 +997,6 @@
             }
         }
 
-        // Resize canvas to match video element
         function resizeCanvas() {
             canvasElement.width = videoElement.offsetWidth;
             canvasElement.height = videoElement.offsetHeight;
@@ -985,8 +1006,8 @@
 
         // Initialize when page loads
         window.addEventListener('load', () => {
-            console.log('หน้าโหลดแล้ว กำลังเตรียม...');
-            setTimeout(initializeHandDetection, 1000);
+            console.log('Page loaded, initializing...');
+            setTimeout(initializeMediaPipe, 500);
         });
     </script>
 </body>
