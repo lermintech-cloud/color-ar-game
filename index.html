@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎨 Color Hunter - Thai Color Learning Game</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+    <!-- Decorative bubbles -->
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+
+    <div class="container">
+        <div class="header">
+            <div class="title">🎨 Color Hunter</div>
+        </div>
+
+        <div class="game-container">
+            <div class="video-section">
+                <video id="video" autoplay playsinline style="display: none;"></video>
+                <canvas id="canvas"></canvas>
+                <div class="cursor-indicator" id="cursorIndicator"></div>
+            </div>
+
+            <div class="game-section">
+                <div class="stats-card">
+                    <div class="stat">
+                        <div class="stat-label">Score</div>
+                        <div class="stat-value" id="score">0</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Time</div>
+                        <div class="stat-value" id="timer">60s</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Level</div>
+                        <div class="stat-value" id="level">1</div>
+                    </div>
+                </div>
+
+                <div class="accuracy-meter">
+                    <div class="accuracy-label">Accuracy</div>
+                    <div class="accuracy-value" id="accuracy">100%</div>
+                </div>
+
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+
+                <div class="instruction-card">
+                    <div class="instruction-text" id="instruction">เริ่มเกม</div>
+                </div>
+
+                <div class="circles-container" id="circlesContainer"></div>
+
+                <div class="buttons-container">
+                    <button class="play-btn" id="playBtn" onclick="startGame()">เริ่มเล่น</button>
+                    <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="reset-screen" id="resetScreen">
+        <div class="reset-content">
+            <h2>🎉 เกมจบแล้ว!</h2>
+            <div class="final-stats">
+                <div class="stat-item">Score: <span id="finalScore">0</span></div>
+                <div class="stat-item">Level: <span id="finalLevel">1</span></div>
+                <div class="stat-item">Accuracy: <span id="finalAccuracy">0</span>%</div>
+            </div>
+            <button class="play-btn" onclick="resetGame()">เล่นอีกครั้ง</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
