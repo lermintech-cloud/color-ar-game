@@ -4,14 +4,480 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎨 Color Hunter - Thai Color Learning Game</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) translateX(0px); }
+            50% { transform: translateY(-20px) translateX(10px); }
+        }
+
+        .bubble {
+            position: fixed;
+            border-radius: 50%;
+            opacity: 0.1;
+            animation: float 6s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .bubble:nth-child(1) { width: 80px; height: 80px; background: white; top: 10%; left: 10%; animation-delay: 0s; }
+        .bubble:nth-child(2) { width: 60px; height: 60px; background: white; top: 20%; right: 10%; animation-delay: 2s; }
+        .bubble:nth-child(3) { width: 100px; height: 100px; background: white; bottom: 10%; left: 15%; animation-delay: 4s; }
+        .bubble:nth-child(4) { width: 70px; height: 70px; background: white; bottom: 20%; right: 15%; animation-delay: 1s; }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            height: 100vh;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            z-index: 10;
+        }
+
+        .title {
+            font-size: 3.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .game-container {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            z-index: 5;
+        }
+
+        .video-section {
+            flex: 1;
+            position: relative;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            z-index: 50;
+        }
+
+        .spinner {
+            border: 4px solid rgba(102, 126, 234, 0.2);
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #667eea;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .cursor-indicator {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background: radial-gradient(circle, #ff6b6b 0%, #ee5a6f 100%);
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 10px rgba(255, 107, 107, 0.6);
+            pointer-events: none;
+            z-index: 100;
+            display: none;
+            transform: translate(-50%, -50%);
+        }
+
+        .game-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .stats-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 15px 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #23a6d5;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #23d5ab, #23a6d5);
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .instruction-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .instruction-text {
+            font-size: 2.2rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        .circles-container {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            align-content: center;
+            min-height: 300px;
+        }
+
+        .color-circle {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+            border: 4px solid white;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .color-circle:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .color-circle.selected {
+            animation: popConfetti 0.6s ease-out;
+        }
+
+        @keyframes popConfetti {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(0.9); }
+        }
+
+        .color-circle.wrong {
+            animation: shake 0.4s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
+        .hold-progress {
+            width: 0%;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+            margin-top: 5px;
+            transition: width 0.05s linear;
+        }
+
+        .buttons-container {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        button {
+            padding: 12px 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .play-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            flex: 1;
+        }
+
+        .play-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .play-btn:active {
+            transform: translateY(0);
+        }
+
+        .fullscreen-btn {
+            background: rgba(255, 255, 255, 0.9);
+            color: #667eea;
+            padding: 10px 15px;
+        }
+
+        .fullscreen-btn:hover {
+            background: white;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .reset-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .reset-content {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+        }
+
+        .reset-content h2 {
+            font-size: 2.5rem;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .reset-content .final-stats {
+            font-size: 1.3rem;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .reset-content .stat-item {
+            margin: 10px 0;
+            font-weight: bold;
+            color: #23a6d5;
+        }
+
+        .reset-content button {
+            margin-top: 20px;
+            width: 100%;
+        }
+
+        .confetti {
+            position: fixed;
+            pointer-events: none;
+            z-index: 500;
+        }
+
+        @keyframes confetti-fall {
+            to {
+                transform: translateY(600px) rotate(360deg);
+                opacity: 0;
+            }
+        }
+
+        .accuracy-meter {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 10px;
+            padding: 10px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .accuracy-label {
+            font-size: 0.8rem;
+            color: #666;
+            font-weight: 600;
+        }
+
+        .accuracy-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        @media (max-width: 1024px) {
+            .game-container {
+                flex-direction: column;
+            }
+
+            .video-section {
+                height: 300px;
+            }
+
+            .title {
+                font-size: 2.5rem;
+            }
+
+            .instruction-text {
+                font-size: 1.8rem;
+            }
+
+            .stat-value {
+                font-size: 1.4rem;
+            }
+
+            .circles-container {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+                gap: 10px;
+            }
+
+            .title {
+                font-size: 2rem;
+            }
+
+            .instruction-text {
+                font-size: 1.5rem;
+            }
+
+            .circles-container {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+
+            .stats-card {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
+            .stat {
+                flex: 1;
+                min-width: 100px;
+            }
+
+            .stat-value {
+                font-size: 1.2rem;
+            }
+        }
+    </style>
 </head>
 <body>
-    <!-- Decorative bubbles -->
     <div class="bubble"></div>
     <div class="bubble"></div>
     <div class="bubble"></div>
@@ -24,9 +490,13 @@
 
         <div class="game-container">
             <div class="video-section">
-                <video id="video" autoplay playsinline style="display: none;"></video>
+                <video id="video" autoplay playsinline muted></video>
                 <canvas id="canvas"></canvas>
                 <div class="cursor-indicator" id="cursorIndicator"></div>
+                <div class="loading-overlay" id="loadingOverlay">
+                    <div class="spinner"></div>
+                    <div class="loading-text">กำลังเปิดกล้อง...</div>
+                </div>
             </div>
 
             <div class="game-section">
@@ -80,6 +550,444 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        // Game variables
+        let gameActive = false;
+        let score = 0;
+        let attempts = 0;
+        let correctAnswers = 0;
+        let timeLeft = 60;
+        let level = 1;
+        let currentColorIndex = 0;
+        let handPosition = null;
+        let hoveredCircleId = null;
+        let holdStartTime = null;
+        let detector = null;
+        const HOLD_DURATION = 500;
+        
+        const COLORS = [
+            { name: 'แดง', thai: 'แตะสีแดง', hex: '#FF6B6B' },
+            { name: 'เขียว', thai: 'แตะสีเขียว', hex: '#51CF66' },
+            { name: 'เหลือง', thai: 'แตะสีเหลือง', hex: '#FFD93D' },
+            { name: 'น้ำเงิน', thai: 'แตะสีน้ำเงิน', hex: '#6C5CE7' },
+            { name: 'ม่วง', thai: 'แตะสีม่วง', hex: '#A29BFE' },
+            { name: 'ชมพู', thai: 'แตะสีชมพู', hex: '#FD79A8' },
+            { name: 'ส้ม', thai: 'แตะสีส้ม', hex: '#FDCB6E' }
+        ];
+
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        async function initializeHandDetection() {
+            try {
+                console.log('กำลังเตรียม Hand Detection...');
+                
+                // Check if tf and hand-pose-detection are loaded
+                let attempts = 0;
+                while ((typeof tf === 'undefined' || typeof handPoseDetection === 'undefined') && attempts < 20) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    attempts++;
+                }
+
+                if (typeof tf === 'undefined' || typeof handPoseDetection === 'undefined') {
+                    throw new Error('ไลบรารี่ยังไม่พร้อม โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+                }
+
+                // Initialize hand pose detection
+                const model = await handPoseDetection.createDetector(
+                    handPoseDetection.SupportedModels.MediaPipeHands,
+                    {
+                        runtime: 'mediapipe',
+                        solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/hands'
+                    }
+                );
+                detector = model;
+                console.log('Hand Detection พร้อมแล้ว');
+
+                // Start video stream
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
+                
+                videoElement.srcObject = stream;
+                
+                videoElement.onloadedmetadata = () => {
+                    videoElement.play();
+                    document.getElementById('loadingOverlay').style.display = 'none';
+                    console.log('กล้องพร้อมแล้ว');
+                    resizeCanvas();
+                    startDetection();
+                };
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message);
+            }
+        }
+
+        function showError(message) {
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.innerHTML = `
+                <div style="color: #e74c3c; font-size: 1.2rem; font-weight: bold; text-align: center; padding: 20px;">
+                    ⚠️ ปัญหา<br><br>
+                    ${message}<br><br>
+                    <button onclick="location.reload()" style="
+                        background: #667eea;
+                        color: white;
+                        border: none;
+                        padding: 10px 20px;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-weight: bold;
+                        font-size: 1rem;
+                    ">🔄 โหลดใหม่</button>
+                </div>
+            `;
+        }
+
+        async function startDetection() {
+            async function detectFrame() {
+                if (!detector) {
+                    requestAnimationFrame(detectFrame);
+                    return;
+                }
+
+                try {
+                    const predictions = await detector.estimateHands(videoElement);
+                    
+                    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+                    if (predictions && predictions.length > 0) {
+                        const hand = predictions[0];
+                        drawHandSkeleton(hand.keypoints);
+                        
+                        // Get index fingertip (keypoint 8)
+                        const indexTip = hand.keypoints[8];
+                        const x = (1 - indexTip.x / videoElement.videoWidth) * canvasElement.width;
+                        const y = (indexTip.y / videoElement.videoHeight) * canvasElement.height;
+
+                        handPosition = { x, y };
+
+                        const cursor = document.getElementById('cursorIndicator');
+                        cursor.style.display = 'block';
+                        cursor.style.left = x + 'px';
+                        cursor.style.top = y + 'px';
+
+                        if (gameActive) {
+                            checkCircleHover(x, y);
+                        }
+                    } else {
+                        handPosition = null;
+                        document.getElementById('cursorIndicator').style.display = 'none';
+                    }
+                } catch (e) {
+                    console.error('Detection error:', e);
+                }
+
+                requestAnimationFrame(detectFrame);
+            }
+
+            detectFrame();
+        }
+
+        function drawHandSkeleton(keypoints) {
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 4],
+                [0, 5], [5, 6], [6, 7], [7, 8],
+                [0, 9], [9, 10], [10, 11], [11, 12],
+                [0, 13], [13, 14], [14, 15], [15, 16],
+                [0, 17], [17, 18], [18, 19], [19, 20]
+            ];
+
+            canvasCtx.strokeStyle = 'rgba(102, 126, 234, 0.5)';
+            canvasCtx.lineWidth = 2;
+
+            connections.forEach(connection => {
+                const start = keypoints[connection[0]];
+                const end = keypoints[connection[1]];
+                const startX = (1 - start.x / videoElement.videoWidth) * canvasElement.width;
+                const startY = (start.y / videoElement.videoHeight) * canvasElement.height;
+                const endX = (1 - end.x / videoElement.videoWidth) * canvasElement.width;
+                const endY = (end.y / videoElement.videoHeight) * canvasElement.height;
+
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(startX, startY);
+                canvasCtx.lineTo(endX, endY);
+                canvasCtx.stroke();
+            });
+
+            keypoints.forEach((keypoint, idx) => {
+                const x = (1 - keypoint.x / videoElement.videoWidth) * canvasElement.width;
+                const y = (keypoint.y / videoElement.videoHeight) * canvasElement.height;
+                canvasCtx.fillStyle = idx === 8 ? '#FF6B6B' : 'rgba(102, 126, 234, 0.8)';
+                canvasCtx.beginPath();
+                canvasCtx.arc(x, y, idx === 8 ? 6 : 4, 0, 2 * Math.PI);
+                canvasCtx.fill();
+            });
+        }
+
+        function checkCircleHover(x, y) {
+            const circles = document.querySelectorAll('.color-circle');
+            let isHovering = false;
+
+            circles.forEach(circle => {
+                const rect = circle.getBoundingClientRect();
+                const distance = Math.sqrt(
+                    Math.pow(x - (rect.left + rect.width / 2), 2) +
+                    Math.pow(y - (rect.top + rect.height / 2), 2)
+                );
+
+                if (distance < rect.width / 2) {
+                    isHovering = true;
+                    const circleId = circle.getAttribute('data-color-id');
+
+                    if (hoveredCircleId !== circleId) {
+                        hoveredCircleId = circleId;
+                        holdStartTime = Date.now();
+                    }
+
+                    if (holdStartTime) {
+                        const elapsed = Date.now() - holdStartTime;
+                        const progress = Math.min((elapsed / HOLD_DURATION) * 100, 100);
+                        circle.style.setProperty('--hold-progress', progress + '%');
+
+                        if (elapsed >= HOLD_DURATION) {
+                            selectCircle(circleId);
+                            holdStartTime = null;
+                            hoveredCircleId = null;
+                        }
+                    }
+                } else {
+                    circle.style.setProperty('--hold-progress', '0%');
+                }
+            });
+
+            if (!isHovering) {
+                hoveredCircleId = null;
+                holdStartTime = null;
+            }
+        }
+
+        function selectCircle(colorId) {
+            const circle = document.querySelector(`[data-color-id="${colorId}"]`);
+            const targetColorId = document.getElementById('instruction').getAttribute('data-target');
+
+            attempts++;
+
+            if (colorId === targetColorId) {
+                correctAnswers++;
+                circle.classList.add('selected');
+                playSuccessSound();
+                createConfetti();
+                score += 10 * level;
+                speakColor(COLORS[parseInt(colorId)].name);
+
+                setTimeout(() => {
+                    nextRound();
+                }, 800);
+            } else {
+                circle.classList.add('wrong');
+                playWrongSound();
+
+                setTimeout(() => {
+                    circle.classList.remove('wrong');
+                }, 400);
+            }
+
+            updateStats();
+        }
+
+        function nextRound() {
+            currentColorIndex = Math.floor(Math.random() * COLORS.length);
+            generateCircles();
+            updateInstruction();
+        }
+
+        function generateCircles() {
+            const container = document.getElementById('circlesContainer');
+            container.innerHTML = '';
+
+            const circleIndices = [];
+            while (circleIndices.length < 6) {
+                const idx = Math.floor(Math.random() * COLORS.length);
+                if (!circleIndices.includes(idx)) {
+                    circleIndices.push(idx);
+                }
+            }
+
+            circleIndices.forEach((idx) => {
+                const circle = document.createElement('div');
+                circle.className = 'color-circle';
+                circle.setAttribute('data-color-id', idx);
+                circle.style.background = COLORS[idx].hex;
+
+                const progress = document.createElement('div');
+                progress.className = 'hold-progress';
+                progress.style.width = '0%';
+                circle.appendChild(progress);
+
+                container.appendChild(circle);
+            });
+        }
+
+        function updateInstruction() {
+            const instruction = document.getElementById('instruction');
+            instruction.textContent = COLORS[currentColorIndex].thai;
+            instruction.setAttribute('data-target', currentColorIndex);
+        }
+
+        function startGame() {
+            if (gameActive) return;
+
+            gameActive = true;
+            score = 0;
+            attempts = 0;
+            correctAnswers = 0;
+            timeLeft = 60;
+            level = 1;
+
+            document.getElementById('playBtn').disabled = true;
+            generateCircles();
+            updateInstruction();
+            updateStats();
+
+            const timer = setInterval(() => {
+                timeLeft--;
+                document.getElementById('timer').textContent = timeLeft + 's';
+
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function updateStats() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('level').textContent = level;
+
+            const accuracy = attempts > 0 ? Math.round((correctAnswers / attempts) * 100) : 100;
+            document.getElementById('accuracy').textContent = accuracy + '%';
+
+            const progress = ((60 - timeLeft) / 60) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+
+            level = Math.floor(correctAnswers / 5) + 1;
+        }
+
+        function endGame() {
+            gameActive = false;
+            const accuracy = attempts > 0 ? Math.round((correctAnswers / attempts) * 100) : 0;
+
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalLevel').textContent = level;
+            document.getElementById('finalAccuracy').textContent = accuracy;
+            document.getElementById('resetScreen').style.display = 'flex';
+            document.getElementById('playBtn').disabled = false;
+        }
+
+        function resetGame() {
+            document.getElementById('resetScreen').style.display = 'none';
+            startGame();
+        }
+
+        function createConfetti() {
+            for (let i = 0; i < 30; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * window.innerWidth + 'px';
+                confetti.style.top = '-10px';
+                confetti.style.width = Math.random() * 10 + 5 + 'px';
+                confetti.style.height = confetti.style.width;
+                confetti.style.background = COLORS[Math.floor(Math.random() * COLORS.length)].hex;
+                confetti.style.borderRadius = '50%';
+                confetti.style.animation = `confetti-fall ${2 + Math.random()}s linear`;
+
+                document.body.appendChild(confetti);
+
+                setTimeout(() => confetti.remove(), 2500);
+            }
+        }
+
+        function playSuccessSound() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+
+                oscillator.connect(gain);
+                gain.connect(audioContext.destination);
+
+                oscillator.frequency.value = 800;
+                gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.3);
+            } catch (e) {
+                console.log('Sound unavailable');
+            }
+        }
+
+        function playWrongSound() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+
+                oscillator.connect(gain);
+                gain.connect(audioContext.destination);
+
+                oscillator.frequency.value = 300;
+                gain.gain.setValueAtTime(0.2, audioContext.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.2);
+            } catch (e) {
+                console.log('Sound unavailable');
+            }
+        }
+
+        function speakColor(colorName) {
+            if ('speechSynthesis' in window) {
+                try {
+                    const utterance = new SpeechSynthesisUtterance('สี' + colorName);
+                    utterance.lang = 'th-TH';
+                    utterance.rate = 0.8;
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(utterance);
+                } catch (e) {
+                    console.log('Speech unavailable');
+                }
+            }
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log('Fullscreen unavailable');
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Resize canvas to match video element
+        function resizeCanvas() {
+            canvasElement.width = videoElement.offsetWidth;
+            canvasElement.height = videoElement.offsetHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // Initialize when page loads
+        window.addEventListener('load', () => {
+            console.log('หน้าโหลดแล้ว กำลังเตรียม...');
+            setTimeout(initializeHandDetection, 1000);
+        });
+    </script>
 </body>
 </html>
